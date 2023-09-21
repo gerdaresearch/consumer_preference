@@ -1,0 +1,425 @@
+# コンジョイント分析 
+# 前処理（3位まで順位スコア、属性水準と商品カードプロファイルのdf化）～ダミー変数化～回帰分析（数量化Ⅰ類）、部分効用値、重要度～描画まで
+
+# 内容　物流対策テーマ　自宅用切り花の選好　8商品から、1～３位まで順位付け
+# 商品の組合せ　属性×４、各水準×2　サイズ、スタイル、日持ち日数、アップサイクルの有無
+# 属性	水準１／水準2
+# 属性 1　サイズ　小さめ／標準
+# 属性 2　スタイル　季節の花／目新しい花
+# 属性 3  日持ち日数　5日／10日
+# 属性 4  アップサイクル有無　アップサイクル／通常品
+
+
+
+# 1. 準備
+## パッケージ読み込み
+
+import pandas as pd
+import numpy as np
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# 日本語表記パッケージ
+import japanize_matplotlib
+
+# ローデータ読み込み
+df23 = pd.read_csv('raw_Flower2023.csv', encoding='utf-8-sig')
+FLC23 = df23.copy()
+
+
+
+# 2.前処理
+# データフレームを加工、回帰分析のための目的変数、説明変数（ダミー変数化）を準備
+# 属性水準と、カードごとの評価を合わせる
+
+# （1）CJT用データ  
+# ローデータ　コンジョイントカード　「よい順」1位（Q14_1)～3位(Q14_3)　選択カードの番号
+CJT = FLC23[['Q14_1', 'Q14_2', 'Q14_3']]
+CJT.head(20)
+
+# CJTID　データフレーム作成　IDを振り、Q14_1～Q14_3までの3列（選好順位）：１～8までの商品番号（整数）
+CJTID = pd.DataFrame(CJT)
+
+# コンジョイント用被験者IDを振る
+CJTID["resID"] = np.arange(1, len(CJTID) + 1)
+
+# resIDを冒頭に移動
+CJTID = CJTID[['resID'] + [c for c in CJTID.columns if c != 'resID']]
+
+# 結果を表示
+print(CJTID)
+
+# (2) 1変数＝1行に加工　選好順位判定列を作る
+# CJTID3を作成
+CJTID3 = CJTID.copy()
+
+# 1行に選好順位１～3位まで3変数入っている　⇒ 1行＝１変数で回帰分析できるよう、IDごとに2行分コピーして3行にする
+# resIDごとに、2行ずつ追加する
+for i in range(len(CJTID)):
+    # 2行分コピーする
+    CJTID3 = CJTID3.append([CJTID.loc[i, :], CJTID.loc[i, :]], ignore_index=True)
+
+# resIDごとに、昇順にソートする
+CJTID3 = CJTID3.sort_values("resID")
+
+
+# prfr列を追加する 選好順位
+CJTID3['prfr'] = [(i % 3) + 1 for i in range(len(CJTID3))]
+
+# card列を追加する
+CJTID3['card'] = CJTID3.apply(lambda row: CJT.loc[int(row['resID']) - 1, f'Q14_{row["prfr"]}'], axis=1)
+
+# 結果を表示する
+print(CJTID3)
+
+
+# (3) 商品カードの属性・水準の参照dfを作る
+# 直交表（L8×2^7）を元に、8つの商品カードの属性・水準割付、データフレームを作成
+df_levels = pd.DataFrame({
+    'card': [1, 2, 3, 4, 5, 6, 7, 8],
+    'at1_size': [1, 1, 1, 1, 0, 0, 0, 0],
+    'at2_style': [1, 1, 0, 0, 1, 1, 0, 0],
+    'at3_days': [1, 1, 0, 0, 0, 0, 1, 1],
+    'at4_upcyc': [1, 0, 1, 0, 1, 0, 1, 0]
+}, dtype=int)  # 各属性・水準を整数に変換
+
+df_levels
+
+
+# (4) 属性・水準情報と、データを結合　データフレームに追加
+# attributesとlevelsを元にした属性・水準のデータフレームの作成（前述のコードを使用）
+attributes = ['at1_size', 'at2_style', 'at3_days', 'at4_upcyc']
+
+# 商品番号に対応する属性・水準の組み合わせを取得する関数
+def get_attribute_combination(card_num):
+    return df_levels.loc[card_num - 1, attributes].astype(int).tolist()  # 小数点以下切り捨ての整数に変換
+
+# 属性・水準の組み合わせを割り当ててデータフレームに追加
+for index, row in CJTID3.iterrows():
+    card_num = row['card']
+    attribute_combination = df_levels.loc[card_num - 1, attributes].astype(int).tolist()
+    
+    # 属性・水準の組み合わせをデータフレームに追加
+    for i, attribute in enumerate(attributes):
+        CJTID3.at[index, attribute] = attribute_combination[i]
+
+# 新しく追加した列のデータ型を整数に変換
+CJTID3[attributes] = CJTID3[attributes].astype(int)
+
+#card列と、属性水準の割付がdfで対応しているか、確認
+print(CJTID3)
+
+CJTID3.describe() # 基本統計量を確認
+
+
+# (5) 部分効用の回帰分析用に、属性水準 ０，１のダミー変数化（列を変える）
+# dfの動作確認後、再実行　今回はダミー変数を結合していく
+
+# ダミー変数化
+df_levels = pd.get_dummies(df_levels, columns=['at1_size', 'at2_style', 'at3_days', 'at4_upcyc'])
+
+# ダミー変数を結合
+for attribute in df_levels.columns:
+    if attribute.startswith('at'):
+        CJTID3[attribute] = 0  # 初期化
+
+# 属性・水準の組み合わせを選好順位データフレームに追加
+for index, row in CJTID3.iterrows():
+    card_num = row['card']
+    attribute_combination = df_levels[df_levels['card'] == card_num].iloc[0]
+    for attribute in df_levels.columns:
+        if attribute.startswith('at'):
+            CJTID3.at[index, attribute] = attribute_combination[attribute]
+
+# 列削除（ダミー変数化前の、at1～at4の4列）
+# CJTID3.drop(['at1_size', 'at2_style', 'at3_days', 'at4_upcyc'], axis=1, inplace=True)
+
+CJTID3
+
+
+
+# 3．各カードの選好度　平均順位得点を算出、データフレーム化
+#(1) 各カードの選好スコアを計算、平均順位得点を算出（目的変数にする）
+#　　cardの番号１～８それぞれについて、prfr１～３まで順番に、度数を計算
+# 　 ８カード（行）×3列の dfに格納
+#(2) 度数×prfrの割り当てスコアを掛ける　たとえば、Q14_1＝第1位選好カードなら、pref=1で、スコア3 
+#　　prfr = 1 （3点） 　prfr = 2（2点）　 prfr =3（1点）　選好外（   0点）
+#(3)  (2)から、cardごとに、スコア の総合計を計算
+#(4)  (3) を、cardごとに、n=500 で割った値 =  平均順位得点　
+#(5)  card列の値を参照して、cardの平均順位得点を代入していく
+
+
+n = 500  # 回答者総数
+
+# 選好順位に応じて、スコアの割り当て
+prfr_scores = {1: 3, 2: 2, 3: 1}
+
+# 平均順位得点の計算と追加
+for card_num in range(1, 9):
+    # カード番号ごとに度数を計算
+    frequency = CJTID3[CJTID3['card'] == card_num]['prfr'].value_counts().sort_index()
+    
+    # カード番号ごとに度数にスコアを掛ける
+    scores = frequency * [prfr_scores.get(prfr, 0) for prfr in frequency.index]
+    
+    # カード番号ごとにスコアの総合計を計算し、n=500 で割って平均順位得点を求める
+    average_ranking = sum(scores) / 500
+    
+    # 平均順位得点をCJTID3データフレームに追加
+    CJTID3.loc[CJTID3['card'] == card_num, 'ranking'] = average_ranking
+    
+# 作業用のカラムを削除
+#for card_num in range(1, 9):
+#    score_column = f'card_{card_num}_score'
+#    CJTID3.drop(score_column, axis=1, inplace=True)
+    
+CJTID3
+
+print(CJTID3.columns)
+print(CJTID3.dtypes)
+
+
+# (5) 平均順位得点の一覧表
+# CJTID3 から card 列ごと、属性水準とranking を抽出 　対応表としてat_rankの名前で保存
+# 空のリストを作成
+ave_rankings = []
+
+# カードごとにaverage_rankingを抽出してリストに追加
+for card_num in range(1, 9):
+    ave_ranking = CJTID3[CJTID3['card'] == card_num]['ranking'].iloc[0]  # 平均順位得点を抽出
+    ave_rankings.append({'card': card_num, 'ave_ranking': ave_ranking})  # リストに追加
+
+# average_rankingsをデータフレームに変換
+ave_rankings_df = pd.DataFrame(ave_rankings)
+
+# df_levels と average_ranking をカード列をキーにして結合する
+at_rank = df_levels.merge(ave_rankings_df, on='card', how='left')
+
+# 結合後のデータフレームを表示
+print(at_rank)
+
+
+
+
+# 4. 回帰分析～部分効用値可視化
+(1) 効用のdf（TU）　目的変数はランキング（平均順位得点）
+# 回帰分析に必要な列だけコピー、別のdfで操作
+TU = CJTID3.copy()
+columns_to_drop = ['resID', 'Q14_1', 'Q14_2', 'Q14_3', 'prfr', 'card','at1_size', 'at2_style', 'at3_days', 'at4_upcyc']
+TU.drop(columns_to_drop, axis=1, inplace=True)
+print(TU)
+
+y = TU['ranking']
+x = TU.drop(['ranking'], axis=1)
+x = sm.add_constant(x)  # 定数項（切片）を追加
+x
+
+
+# (2) 回帰分析～部分効用値可視化
+# OLS (Ordinary Least Squares) でフィッティング
+import statsmodels.api as sm
+
+plt.style.use('bmh')
+
+model = sm.OLS(y, x)
+# フィッティングを実行
+result = model.fit()
+# 結果の一覧を表示
+result.summary()
+
+# 2項分布の場合　
+# result = sm.OLS(y, x, family=sm.families.Binomial()).fit()
+
+
+# (3) corfとｐ値を取り出し 保存
+result_w_p = pd.DataFrame({
+    'coef': result.params.values
+    , 'p_val': result.pvalues
+})
+result_w_p
+
+
+
+# (3) 部分効用値
+# 係数だけのdf
+result_w = result_w_p["coef"][1:]
+print(result_w)
+
+# タイプを確認
+if isinstance(result_w, pd.Series):
+    print('これはSeriesです。')
+elif isinstance(result_w, pd.DataFrame):
+    print('これはDataFrameです。')
+else:
+    print('これはSeriesでもDataFrameでもありません。')
+
+
+
+# (4) 部分効用値　属性水準の対称化
+# 水準（2水準）を対称化する　
+# 属性水準ごとに平均値を計算
+
+# OLS回帰分析結果を引用したresult_w_pから、切片を除くcoef列を抽出(行の操作のindex属性は使えない）
+result_w = result_w_p["coef"][1:]
+result_w
+
+# 平均値を各水準の部分効用値から引いて、対称化（水準部分効用値ー平均値）
+# 属性ごとに平均値を計算
+means = result_w.mean()
+
+df_symmetric = result_w.copy()
+df_symmetric = df_symmetric- means
+
+# 対称化された部分効用値を表示
+print(df_symmetric)
+
+
+# （5）対称化された部分効用値の描画
+import matplotlib.pyplot as plt
+import japanize_matplotlib
+
+# フォント設定を元に戻す
+plt.rcParams['font.family'] = 'sans-serif'  # またはデフォルトのフォントファミリー
+plt.rcParams['font.sans-serif'] = []  # フォントリストを空にする
+
+# フォントを設定
+plt.rcParams['font.family'] = 'Meiryo'
+
+
+# 対称化された部分効用値の描画
+fig, ax = plt.subplots(figsize=(8, 6))
+
+# 正の方向のバーは空色、負の方向のバーはピンク色に設定
+colors = ['dodgerblue' if df_symmetric >= 0 else '#ff6a80' for df_symmetric in df_symmetric]
+
+bars = plt.barh(df_symmetric.index, df_symmetric, height=0.5, color=colors)
+
+
+# 属性名のリスト
+attribute_names = ["1.サイズ「標準」", "1.サイズ　「小さめ」", "2.スタイル 「目新しさ」", "2.スタイル 「季節の花」", "3.日持ち 「10日」", "3.日持ち 「5日」", "4.規格 「通常品」", "4.規格 「アップサイクル」"]
+
+plt.title("属性・水準ごとの部分効用値")
+plt.yticks(df_symmetric.index, attribute_names)
+
+# y軸の表示を逆転
+plt.gca().invert_yaxis()
+
+
+# 値を棒グラフに追加　
+# x 座標を width + 0.01 として、バーの先端外側に値を配置
+for bar in bars:
+    width = bar.get_width()
+    align = 'left' if width >= 0 else 'right'  # バーの左側または右側に配置
+    plt.text(width + 0.01 if width >= 0 else width - 0.01, bar.get_y() + bar.get_height() / 2, f'{width:.3f}', ha=align, va='center')
+    
+# x軸の範囲を調整
+ax.set_xlim(-0.3, 0.3)
+#　描画
+plt.show()
+
+# 部分効用値対称化　表
+df_symmetric
+
+
+
+
+# 5.重要度 算出  レンジ～重要度～描画
+#（1）準備
+df_ri = pd.DataFrame(df_symmetric).copy()
+df_ri
+df_ri = df_ri.rename(index = {'at1_size_0':'at1_0', 
+                             'at1_size_1':'at1_1',
+                             'at2_style_0':'at2_0',
+                             'at2_style_1':'at2_1',
+                             'at3_days_0':'at3_0',
+                             'at3_days_1':'at3_1',
+                             'at4_upcyc_0':'at4_0',
+                             'at4_upcyc_1':'at4_1',})
+print(df_ri)
+print(df_ri.dtypes)
+
+# タイプを調べる
+if isinstance(df_ri, pd.Series):
+    print('これはSeriesです。')
+elif isinstance(df_ri, pd.DataFrame):
+    print('これはDataFrameです。')
+else:
+    print('これはSeriesでもDataFrameでもありません。')
+
+
+# (2) 属性のレンジ値の計算
+# df_riのcoefの値を「絶対値」にする（打ち消しあって０にならないように）
+# レンジ値 ＝ 属性ごとに、各水準効用の絶対値を、足し合わせ（at1、at2、at3、at4　の4属性）
+
+# df_ri の値を絶対値に変換
+df_ri['coef'] = df_ri['coef'].abs()
+
+# 属性ごとにレンジ値を計算
+attributes = ['at1', 'at2', 'at3', 'at4']
+ranges = {}
+
+for attribute in attributes:
+    attribute_columns = [col for col in df_ri.index if col.startswith(attribute)]
+    attribute_range = df_ri.loc[attribute_columns, 'coef'].sum()
+    ranges[attribute] = attribute_range
+
+    
+# 各属性のレンジ値を表示
+for attribute, range_value in ranges.items():
+    print(f'{attribute} のレンジ値: {range_value}')    
+    
+    
+# レンジ合計値を計算
+total_range = sum(ranges.values())
+total_range
+
+
+
+# (3) 重要度（%）の計算
+# レンジの値を合計
+# 重要度 ＝ レンジ合計値に対して、（1）で計算した各属性のレンジが占める割合（％）
+
+importance = {attribute: (range_value / total_range) * 100 for attribute, range_value in ranges.items()}
+importance
+
+# 表形式で出力
+# importanceをDataFrameに変換
+df_importance = pd.DataFrame({'属性': list(importance.keys()), '重要度(%)': list(importance.values())})
+
+# 表示
+print(df_importance)
+
+
+
+# (4) 描画　重要度　横軸棒グラフ
+# グラフのy軸名は、上から順に、属性 1　サイズ、属性 2　スタイル、属性 3  日持ち日数、属性 4  アップサイクル有無
+
+# 重要度データの準備
+# 属性名のリスト
+attribute4 = ["1.サイズ", "2.スタイル", "3.日持ち", "4.規格"]
+
+# パステルカラーのパレットを設定
+pastel_colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightsalmon']
+
+# 棒グラフを描画
+plt.figure(figsize=(8, 6))  # グラフのサイズを調整
+bars = plt.barh(df_importance['属性'], df_importance['重要度(%)'], color=pastel_colors)
+
+# グラフのタイトルと軸ラベルを設定
+plt.title("属性の重要度")
+plt.xlabel("重要度(%)")
+plt.ylabel("属性", rotation=0, va='center', ha='right')  # y軸 vaとhaの設定で位置を調整
+
+plt.yticks(df_importance.index, attribute4)
+
+# y軸の表示を逆転
+plt.gca().invert_yaxis()
+
+# 各バーの上に値を表示
+for bar in bars:
+    width = bar.get_width()
+    plt.text(width, bar.get_y() + bar.get_height() / 2, f'{width:.1f}%', ha='left', va='center')
+
+# グラフを表示
+plt.show()
