@@ -23,8 +23,8 @@ import matplotlib.pyplot as plt
 # 日本語表記パッケージ
 import japanize_matplotlib
 
-# ローデータ読み込み
-df23 = pd.read_csv('raw_Flower2023.csv', encoding='utf-8-sig')
+# ローデータ読み込み raw_Fl23.csv は自分のファイルに置き換える
+df23 = pd.read_csv('raw_Fl23.csv', encoding='utf-8-sig')
 FLC23 = df23.copy()
 
 
@@ -33,7 +33,7 @@ FLC23 = df23.copy()
 # データフレームを加工、回帰分析のための目的変数、説明変数（ダミー変数化）を準備
 # 属性水準と、カードごとの評価を合わせる
 
-# （1）CJT用データ  
+# (1) CJT用データ  
 # ローデータ　コンジョイントカード　「よい順」1位（Q14_1)～3位(Q14_3)　選択カードの番号
 CJT = FLC23[['Q14_1', 'Q14_2', 'Q14_3']]
 CJT.head(20)
@@ -140,15 +140,18 @@ CJTID3
 
 
 # 3．各カードの選好度　平均順位得点を算出、データフレーム化
-#(1) 各カードの選好スコアを計算、平均順位得点を算出（目的変数にする）
+# (1) 各カードの選好スコアを計算、平均順位得点を算出（目的変数にする）
 #　　cardの番号１～８それぞれについて、prfr１～３まで順番に、度数を計算
-# 　 ８カード（行）×3列の dfに格納
-#(2) 度数×prfrの割り当てスコアを掛ける　たとえば、Q14_1＝第1位選好カードなら、pref=1で、スコア3 
-#　　prfr = 1 （3点） 　prfr = 2（2点）　 prfr =3（1点）　選好外（   0点）
-#(3)  (2)から、cardごとに、スコア の総合計を計算
-#(4)  (3) を、cardごとに、n=500 で割った値 =  平均順位得点　
-#(5)  card列の値を参照して、cardの平均順位得点を代入していく
+# 　 8カード（行）×3列の dfに格納
 
+# (2) 度数×prfrの割り当てスコアを掛ける　たとえば、Q14_1＝第1位選好カードなら、pref=1で、スコア3 
+#　　prfr = 1 （3点） 　prfr = 2（2点）　 prfr =3（1点）　選好外（   0点）
+
+# (3)  (2)から、cardごとに、スコア の総合計を計算
+
+# (4)  (3) を、cardごとに、n=500 で割った値 =  平均順位得点　
+
+# (5)  card列の値を参照して、cardの平均順位得点を代入していく
 
 n = 500  # 回答者総数
 
@@ -180,7 +183,7 @@ print(CJTID3.columns)
 print(CJTID3.dtypes)
 
 
-# (5) 平均順位得点の一覧表
+# (6) 平均順位得点の一覧表
 # CJTID3 から card 列ごと、属性水準とranking を抽出 　対応表としてat_rankの名前で保存
 # 空のリストを作成
 ave_rankings = []
@@ -203,7 +206,7 @@ print(at_rank)
 
 
 # 4. 回帰分析～部分効用値可視化
-(1) 効用のdf（TU）　目的変数はランキング（平均順位得点）
+# (1) 効用のdf（TU）　目的変数はランキング（平均順位得点）
 # 回帰分析に必要な列だけコピー、別のdfで操作
 TU = CJTID3.copy()
 columns_to_drop = ['resID', 'Q14_1', 'Q14_2', 'Q14_3', 'prfr', 'card','at1_size', 'at2_style', 'at3_days', 'at4_upcyc']
@@ -240,8 +243,7 @@ result_w_p = pd.DataFrame({
 result_w_p
 
 
-
-# (3) 部分効用値
+# (4) 部分効用値
 # 係数だけのdf
 result_w = result_w_p["coef"][1:]
 print(result_w)
@@ -256,7 +258,7 @@ else:
 
 
 
-# (4) 部分効用値　属性水準の対称化
+# (5) 部分効用値　属性水準の対称化
 # 水準（2水準）を対称化する　
 # 属性水準ごとに平均値を計算
 
@@ -275,7 +277,7 @@ df_symmetric = df_symmetric- means
 print(df_symmetric)
 
 
-# （5）対称化された部分効用値の描画
+# (6) 対称化された部分効用値の描画
 import matplotlib.pyplot as plt
 import japanize_matplotlib
 
@@ -286,8 +288,7 @@ plt.rcParams['font.sans-serif'] = []  # フォントリストを空にする
 # フォントを設定
 plt.rcParams['font.family'] = 'Meiryo'
 
-
-# 対称化された部分効用値の描画
+# 描画
 fig, ax = plt.subplots(figsize=(8, 6))
 
 # 正の方向のバーは空色、負の方向のバーはピンク色に設定
@@ -304,7 +305,6 @@ plt.yticks(df_symmetric.index, attribute_names)
 
 # y軸の表示を逆転
 plt.gca().invert_yaxis()
-
 
 # 値を棒グラフに追加　
 # x 座標を width + 0.01 として、バーの先端外側に値を配置
@@ -325,7 +325,7 @@ df_symmetric
 
 
 # 5.重要度 算出  レンジ～重要度～描画
-#（1）準備
+# (1) 準備
 df_ri = pd.DataFrame(df_symmetric).copy()
 df_ri
 df_ri = df_ri.rename(index = {'at1_size_0':'at1_0', 
@@ -348,7 +348,7 @@ else:
     print('これはSeriesでもDataFrameでもありません。')
 
 
-# (2) 属性のレンジ値の計算
+# (2)  属性のレンジ値の計算
 # df_riのcoefの値を「絶対値」にする（打ち消しあって０にならないように）
 # レンジ値 ＝ 属性ごとに、各水準効用の絶対値を、足し合わせ（at1、at2、at3、at4　の4属性）
 
